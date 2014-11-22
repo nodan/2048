@@ -1,8 +1,11 @@
 /*
- * A 2048 player.
+ * Play 2048
  *
- * (c) Kai Tomerius
- * GPLv2
+ * 2048 is a single-player puzzle game, in which the objective is to slide
+ * numbered tiles on a grid to combine them and create a tile with the number 2048.
+ *
+ * (c) 2014 by Kai Tomerius
+ * License: GPLv2
  */
 
 #include <libgen.h>
@@ -12,6 +15,8 @@
 #include <sys/timeb.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 int verbose = 0;
 
@@ -26,7 +31,10 @@ static int start[4] = { 0, 3, 0, 12 };
 static int row_inc[4]  = { 4, 4, 1, 1 };
 static int col_inc[4]  = { 1, -1, 4, -4 };
 
-// player strategies: move up, biggest direct score gain, order numbers per row: left - right - left ...
+// player strategies:
+// - move up
+// - biggest direct score gain
+// - order numbers per row: first row left to right, second row right to left ...
 typedef enum strategy { s_up, s_score, s_lr } strategy;
 
 // print_row - print one row of the board
@@ -44,6 +52,9 @@ void print_board(board b) {
     printf("\n");
 }
 
+// board_notation - generate board notation
+// surround numbers by two levels of brackets, e.g.:
+// [[2 0 0 0] [0 0 0 0] [0 0 0 0] [0 0 0 2]]
 const char* board_notation(board b) {
     static char notation[256];
     unsigned m, n;
@@ -58,16 +69,39 @@ const char* board_notation(board b) {
     return notation;
 }
 
+// connect_server - connect to a 2048 server through TCP/IP
+static struct sockaddr_in addr;
+static int fd = 0;
 int connect_server(const char* ip) {
-    return 0;
+   bzero(&addr,sizeof(addr));
+   addr.sin_family = AF_INET;
+   addr.sin_addr.s_addr = inet_addr(ip);
+   addr.sin_port = htons(2048);
+
+   fd = socket(AF_INET, SOCK_STREAM, 0);
+   connect(fd, (struct sockaddr*) &addr, sizeof(addr));
+   return fd<0;
 }
 
+void disconnect_server() {
+    if (fd>0)
+        close(fd);
+
+    fd = 0;
+}
+
+// send_server - send a command to the server an read the response
 const char* send_server(const char* s) {
-    char cmd[16];
+    static char cmd[256];
     sprintf(cmd, ":%s", s);
-    return s;
+    sendto(fd, cmd, strlen(cmd), 0, (struct sockaddr*) &addr,sizeof(addr));
+    int n = recvfrom(fd, cmd, sizeof(cmd), 0, NULL, NULL);
+    cmd[n>0 ? n : 0] = 0;
+
+    return cmd;
 }
 
+// parse_notation - parse a board notation from the server
 int parse_notation(const char* s, board b) {
     unsigned m=0, n=16;
     while (s[m] && n)
@@ -86,8 +120,8 @@ int parse_notation(const char* s, board b) {
     return (int) n;
 }
 
-// fill - randomly put a 2 or 4 on the board
-unsigned fill(unsigned* b) {
+// drop - randomly drop a 2 or 4 on an empty tile
+unsigned drop(unsigned* b) {
     unsigned n, f=0, r=rand()&~(1<<31);
     for (n=16; n--; )
         f += !b[n] ? 1 : 0;
@@ -109,12 +143,12 @@ unsigned move_row(unsigned* b, int i, int* moved) {
         while (from-->0) {
             if (b[from*i]) {
                 if (!b[to*i]) {
-                    // skip over 0s
+                    // skip over empty tiles
                     b[to*i] = b[from*i];
                     b[from*i] = 0;
                     *moved += 1;
                 } else if (b[to*i]==b[from*i]) {
-                    // field with the same number
+                    // join tiles with the same number
                     b[to*i] += b[from*i];
                     s += b[to*i];
                     b[from*i] = 0;
@@ -155,7 +189,7 @@ dir evaluate(board b, strategy strategy) {
     // prefered directions to move
     dir dd[] = { up, left, right, down };
 
-    // prefered order of fields on the board
+    // prefered order of tiles on the board
     unsigned i, o[] = { 15, 14, 13, 12, 8, 9, 10, 11, 7, 6, 5, 4, 0, 1, 2, 3 };
 
     dir bd = up;
@@ -163,7 +197,7 @@ dir evaluate(board b, strategy strategy) {
 
     if (strategy==s_lr) {
         for (i=0; i<16; i++) {
-            // find the first field affected by the move
+            // find the first tile affected by the move
             if (!b[o[i]] || (i%4!=3 && b[o[i]]==b[o[i+1]])) {
                 if (i/4%2==1) {
                     // move the second, fourth row to the right
@@ -172,7 +206,7 @@ dir evaluate(board b, strategy strategy) {
                 }
 
                 if (!b[o[i]]) {
-                    // move up to fill up rows
+                    // prefer to move left or right to fill empty tiles
                     dd[0] = dd[1];
                     dd[1] = up;
                 }
@@ -186,16 +220,17 @@ dir evaluate(board b, strategy strategy) {
         unsigned* c = clone(b);
         int moved;
         unsigned s = move(c, dd[d], &moved);
-        if (moved && fill(c)) {
-            // evaluate the move
+        if (moved && drop(c)) {
+            // evaluate the move according to strategy
             switch (strategy) {
             case s_lr: {
                 // check the order of numbers on the board
-                for (i=0; i<16; i++) {
+                for (i=1; i<16; i++) {
                     if (b[o[i]] >= b[o[i-1]])
-                        s += b[o[i]];
+                        // add up numbers which are in proper order
+                        s += b[o[i-1]];
                 }
-            } // fall through ...
+            } // fall through to find the best move ...
 
             case s_score:
                 // use the move with the best score
@@ -253,8 +288,8 @@ int main(int argc, const char** argv) {
             return argc-1;
         }
 
-    board b;
-    dir d = (dir) -1;
+    board b; // board
+    dir d = (dir) -1; // last move
     unsigned hs = 0; // highscore
     unsigned as = 0, an = 0; // average score
     while (tries--) {
@@ -271,8 +306,8 @@ int main(int argc, const char** argv) {
         } else {
             // create a board
             memset(b, 0, sizeof(b));
-            fill(b);
-            fill(b);
+            drop(b);
+            drop(b);
         }
 
         // move until the board is full
@@ -289,13 +324,13 @@ int main(int argc, const char** argv) {
         } while (
             // simple strategy: move up, left, right or down, whatever works
             (strategy==s_up && (
-                ((s += move(b, d = up,    &moved)), (moved && fill(b))) ||
-                ((s += move(b, d = left,  &moved)), (moved && fill(b))) ||
-                ((s += move(b, d = right, &moved)), (moved && fill(b))) ||
-                ((s += move(b, d = down,  &moved)), (moved && fill(b))))) ||
+                ((s += move(b, d = up,    &moved)), (moved && drop(b))) ||
+                ((s += move(b, d = left,  &moved)), (moved && drop(b))) ||
+                ((s += move(b, d = right, &moved)), (moved && drop(b))) ||
+                ((s += move(b, d = down,  &moved)), (moved && drop(b))))) ||
             // other strategies: evaluate moves
             (strategy!=s_up && (
-                ((s += move(b, d = evaluate(b, strategy), &moved)), (moved && fill(b))))));
+                ((s += move(b, d = evaluate(b, strategy), &moved)), (moved && drop(b))))));
 
         // calculate the average score
         as += s;
@@ -309,6 +344,9 @@ int main(int argc, const char** argv) {
         } else if (average && tries%16384==0) {
             printf("avg.  %u\n", as/an);
         }
+
+        // disconnect the server, if any
+        disconnect_server();
     }
 
     return 0;
