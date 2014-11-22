@@ -17,7 +17,7 @@ int verbose = 0;
 
 // the board and directions to move
 typedef unsigned board[16];
-typedef enum dir { left, right, up, down } dir;
+typedef enum dir { left, right, up, down, last } dir;
 
 static unsigned char* dirs[4] = { "left", "right", "up", "down" };
 
@@ -42,6 +42,48 @@ void print_board(board b) {
     for (n=4; n--; )
         print_row(b+4*n, 1);
     printf("\n");
+}
+
+const char* board_notation(board b) {
+    static char notation[256];
+    unsigned m, n;
+    sprintf(notation, "[");
+    for (n=4; n--; ) {
+        sprintf(notation+strlen(notation), "[");
+        for (m=4; m--; )
+            sprintf(notation+strlen(notation), "%u%c", *(b+4*n+m), m ? ' ' : '\0');
+        sprintf(notation+strlen(notation), "]%c", n ? ' ' : '\0');
+    }
+    sprintf(notation+strlen(notation), "]");
+    return notation;
+}
+
+int connect_server(const char* ip) {
+    return 0;
+}
+
+const char* send_server(const char* s) {
+    char cmd[16];
+    sprintf(cmd, ":%s", s);
+    return s;
+}
+
+int parse_notation(const char* s, board b) {
+    unsigned m=0, n=16;
+    while (s[m] && n)
+        switch (s[m]) {
+        case '[': case ']': case ' ': m++;
+            break;
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+            b[--n] = atoi(s+m);
+            while (isdigit(s[m]))
+                m++;
+            break;
+        default: return -1;
+        }
+
+    return (int) n;
 }
 
 // fill - randomly put a 2 or 4 on the board
@@ -182,6 +224,7 @@ int main(int argc, const char** argv) {
     unsigned tries = 1, playouts = 0;
     int average = 0;
     strategy strategy = s_up;
+    const char* server = NULL;
 
     // parse command line options
     while (argc>1)
@@ -197,17 +240,21 @@ int main(int argc, const char** argv) {
             argc--, strategy = s_score;
         } else if (!strcmp(argv[argc-1], "--lr")) {
             argc--, strategy = s_lr;
+        } else if (argc>2 && !strcmp(argv[argc-2], "--server")) {
+            server = argv[argc-1];
+            argc -= 2;
         } else {
             if (!strcmp(argv[argc-1], "-h"))
                 argc--;
             else
                 printf("%s: unknown option %s\n", basename((char*) argv[0]), argv[argc-1]);
 
-            printf("usage: %s [--average] [--highscore] [--lr|--score|--up] [-v]\n", basename((char*) argv[0]));
+            printf("usage: %s [--average] [--highscore] [--lr|--score|--up] [--server <ip-address>] [-v]\n", basename((char*) argv[0]));
             return argc-1;
         }
 
     board b;
+    dir d = (dir) -1;
     unsigned hs = 0; // highscore
     unsigned as = 0, an = 0; // average score
     while (tries--) {
@@ -215,25 +262,40 @@ int main(int argc, const char** argv) {
         int moved;
         playouts++;
 
-        // create a board
-        memset(b, 0, sizeof(b));
-        fill(b);
-        fill(b);
+        if (server) {
+            // connect to server
+            if (connect_server(server)) {
+                printf("failure to communicate %s\n", server);
+                return -1;
+            }
+        } else {
+            // create a board
+            memset(b, 0, sizeof(b));
+            fill(b);
+            fill(b);
+        }
 
         // move until the board is full
-        do
+        do {
+            if (server &&
+                ((d<last && send_server(dirs[d])) ||
+                 parse_notation(send_server("board"), b))) {
+                printf("failure to communicate %s\n", server);
+                return -1;
+            }
+
             if (verbose)
                 print_board(b);
-        while (
+        } while (
             // simple strategy: move up, left, right or down, whatever works
             (strategy==s_up && (
-                ((s += move(b, up,    &moved)), (moved && fill(b))) ||
-                ((s += move(b, left,  &moved)), (moved && fill(b))) ||
-                ((s += move(b, right, &moved)), (moved && fill(b))) ||
-                ((s += move(b, down,  &moved)), (moved && fill(b))))) ||
+                ((s += move(b, d = up,    &moved)), (moved && fill(b))) ||
+                ((s += move(b, d = left,  &moved)), (moved && fill(b))) ||
+                ((s += move(b, d = right, &moved)), (moved && fill(b))) ||
+                ((s += move(b, d = down,  &moved)), (moved && fill(b))))) ||
             // other strategies: evaluate moves
             (strategy!=s_up && (
-                ((s += move(b, evaluate(b, strategy), &moved)), (moved && fill(b))))));
+                ((s += move(b, d = evaluate(b, strategy), &moved)), (moved && fill(b))))));
 
         // calculate the average score
         as += s;
