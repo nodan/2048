@@ -170,6 +170,13 @@ See `2048-undoable-random'."
     (setq 2048-random-queue (cons (random) 2048-random-queue))))
 
 (defun 2048-handle-gameover ()
+  "Insert game over message if there are no more moves."
+  (when (2048-gameover)
+        (goto-char (point-max))
+    (newline)
+    (insert "*** Game Over ***")))
+
+(defun 2048-gameover ()
   "Check whether the game is over."
   (catch 'ok
     (dolist (i (number-sequence 1 3))
@@ -178,9 +185,7 @@ See `2048-undoable-random'."
                (= (2048-cell-at i j) (2048-cell-at (1- i) j))
                (= (2048-cell-at j i) (2048-cell-at j (1- i))))
           (throw 'ok nil))))
-    (goto-char (point-max))
-    (newline)
-    (insert "*** Game Over ***")))
+    t))
 
 (defun 2048-start ()
   "Set up a game to start or restart it."
@@ -369,6 +374,8 @@ Keymap:
               (process-send-string proc (prin1-to-string 2048-board)))
              ((eq cmd :score)
               (process-send-string proc (prin1-to-string 2048-score)))
+             ((eq cmd :gameover)
+              (process-send-string proc (if (2048-gameover) "1" "0")))
              (t (process-send-string proc "Error: Command not recognized"))))
           (when (memq cmd '(:up :down :left :right))
             (process-send-string proc "OK"))
