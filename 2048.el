@@ -376,8 +376,9 @@ Keymap:
               (process-send-string proc (prin1-to-string 2048-score)))
              ((eq cmd :gameover)
               (process-send-string proc (if (2048-gameover) "1" "0")))
+             ((eq cmd :start) (2048-start))
              (t (process-send-string proc "Error: Command not recognized"))))
-          (when (memq cmd '(:up :down :left :right))
+          (when (memq cmd '(:up :down :left :right :start))
             (process-send-string proc "OK"))
           (process-send-string proc "\n")))))
 
