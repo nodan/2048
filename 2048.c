@@ -95,7 +95,10 @@ const char* send_server(const char* s) {
     static char cmd[256];
     sprintf(cmd, ":%s", s);
     sendto(fd, cmd, strlen(cmd), 0, (struct sockaddr*) &addr,sizeof(addr));
-    int n = recvfrom(fd, cmd, sizeof(cmd), 0, NULL, NULL);
+    int n = 0;
+    do
+        n += recvfrom(fd, cmd+n, sizeof(cmd)-n, 0, NULL, NULL);
+    while (n==0 || n==1);
     cmd[n>0 ? n : 0] = 0;
 
     return cmd;
@@ -104,9 +107,9 @@ const char* send_server(const char* s) {
 // parse_notation - parse a board notation from the server
 int parse_notation(const char* s, board b) {
     unsigned m=0, n=16;
-    while (s[m] && n)
+    while (n)
         switch (s[m]) {
-        case '[': case ']': case ' ': m++;
+        case '[': case ']': case ' ': case '\n': case '\r': m++;
             break;
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
@@ -114,7 +117,8 @@ int parse_notation(const char* s, board b) {
             while (isdigit(s[m]))
                 m++;
             break;
-        default: return -1;
+        default:
+            return -1;
         }
 
     return (int) n;
@@ -313,7 +317,7 @@ int main(int argc, const char** argv) {
         // move until the board is full
         do {
             if (server &&
-                ((d<last && send_server(dirs[d])) ||
+                ((d<last && !send_server(dirs[d])) ||
                  parse_notation(send_server("board"), b))) {
                 printf("failure to communicate %s\n", server);
                 return -1;
@@ -346,6 +350,8 @@ int main(int argc, const char** argv) {
         }
 
         // disconnect the server, if any
+        if (server)
+            send_server("gameover");
         disconnect_server();
     }
 
