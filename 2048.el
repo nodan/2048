@@ -352,7 +352,6 @@ Keymap:
 
 ;;; remote control via TCP connection
 (defvar 2048-server-name "2048 server")
-(defvar 2048-server-buffer "*2048 server*")
 (defvar 2048-server-port 2048)
 
 (defun 2048-filter (proc msg)
@@ -383,6 +382,6 @@ Keymap:
    :name 2048-server-name
    :service 2048-server-port
    :filter #'2048-filter
-   :buffer 2048-server-buffer))
+   :host 'local))
 
 ;;; 2048.el ends here
