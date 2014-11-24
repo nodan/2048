@@ -94,12 +94,20 @@ void disconnect_server() {
 const char* send_server(const char* s) {
     static char cmd[256];
     sprintf(cmd, ":%s", s);
+
+    if (verbose)
+        printf("send %s\n", cmd);
+
     sendto(fd, cmd, strlen(cmd), 0, (struct sockaddr*) &addr,sizeof(addr));
+
     int n = 0;
     do
         n += recvfrom(fd, cmd+n, sizeof(cmd)-n, 0, NULL, NULL);
     while (n==0 || n==1);
     cmd[n>0 ? n : 0] = 0;
+
+    if (verbose)
+        printf("recv %s\n", cmd);
 
     return cmd;
 }
@@ -303,7 +311,7 @@ int main(int argc, const char** argv) {
 
         if (server) {
             // connect to server
-            if (connect_server(server)) {
+            if (connect_server(server) || !send_server("start")) {
                 printf("failure to communicate %s\n", server);
                 return -1;
             }
