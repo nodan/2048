@@ -195,7 +195,7 @@ unsigned* clone(board b) {
 }
 
 // evaluate - move according to the given strategy
-dir evaluate(board b, strategy strategy) {
+dir evaluate(board b, strategy strategy, unsigned depth, unsigned* score) {
     int d;
 
     // prefered directions to move
@@ -233,24 +233,31 @@ dir evaluate(board b, strategy strategy) {
         int moved;
         unsigned s = move(c, dd[d], &moved);
         if (moved && drop(c)) {
-            // evaluate the move according to strategy
-            switch (strategy) {
-            case s_lr: {
-                // check the order of numbers on the board
-                for (i=1; i<16; i++) {
-                    if (b[o[i]] >= b[o[i-1]])
-                        // add up numbers which are in proper order
-                        s += b[o[i-1]];
+            if (depth) {
+                evaluate(c, strategy, depth-1, &s);
+            } else {
+                // evaluate the move according to strategy
+                switch (strategy) {
+                case s_lr: {
+                    // check the order of numbers on the board
+                    for (i=1; i<16; i++) {
+                        if (b[o[i]] >= b[o[i-1]])
+                            // add up numbers which are in proper order
+                            s += b[o[i-1]];
+                    }
+                    break;
                 }
-            } // fall through to find the best move ...
 
-            case s_score:
-                // use the move with the best score
-                if (s+1>bs) {
-                    bd = dd[d];
-                    bs = s+1;
+                case s_score:
+                    // use the score given by move(...)
+                    break;
                 }
-                break;
+            }
+
+            // use the move with the best score
+            if (s+1>bs) {
+                bd = dd[d];
+                bs = s+1;
             }
         }
 
@@ -260,6 +267,8 @@ dir evaluate(board b, strategy strategy) {
     if (verbose)
         printf("move %s\n", dirs[bd]);
 
+    if (score)
+        *score = bs-1;
     return bd;
 }
 
@@ -268,7 +277,7 @@ int main(int argc, const char** argv) {
     ftime(&t);
     srand(1000*t.time+t.millitm);
 
-    unsigned tries = 1, playouts = 0;
+    unsigned tries = 1, playouts = 0, depth = 0;
     int average = 0;
     strategy strategy = s_up;
     const char* server = NULL;
@@ -287,6 +296,9 @@ int main(int argc, const char** argv) {
             argc--, strategy = s_score;
         } else if (!strcmp(argv[argc-1], "--lr")) {
             argc--, strategy = s_lr;
+        } else if (argc>2 && !strcmp(argv[argc-2], "--depth")) {
+            depth = atoi(argv[argc-1]);
+            argc -= 2;
         } else if (argc>2 && !strcmp(argv[argc-2], "--server")) {
             server = argv[argc-1];
             argc -= 2;
@@ -296,7 +308,7 @@ int main(int argc, const char** argv) {
             else
                 printf("%s: unknown option %s\n", basename((char*) argv[0]), argv[argc-1]);
 
-            printf("usage: %s [--average] [--highscore] [--lr|--score|--up] [--server <ip-address>] [-v]\n", basename((char*) argv[0]));
+            printf("usage: %s [--average] [--highscore] [--lr|--score|--up] [--depth <depth>] [--server <ip-address>] [-v]\n", basename((char*) argv[0]));
             return argc-1;
         }
 
@@ -342,7 +354,7 @@ int main(int argc, const char** argv) {
                 ((s += move(b, d = down,  &moved)), (moved && drop(b))))) ||
             // other strategies: evaluate moves
             (strategy!=s_up && (
-                ((s += move(b, d = evaluate(b, strategy), &moved)), (moved && drop(b))))));
+                ((s += move(b, d = evaluate(b, strategy, depth, NULL), &moved)), (moved && drop(b))))));
 
         // calculate the average score
         as += s;
